@@ -1,0 +1,118 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lead-qualifier
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - CLEARBIT_API_KEY=${CLEARBIT_API_KEY}
+      - HUBSPOT_API_KEY=${HUBSPOT_API_KEY}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-qualifier}:${POSTGRES_PASSWORD:-qualifier}@postgres:5432/${POSTGRES_DB:-lead_qualifier}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - qualifier-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: lead-qualifier-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - qualifier-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: lead-qualifier-postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-qualifier}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qualifier}
+      POSTGRES_DB: ${POSTGRES_DB:-lead_qualifier}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qualifier}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - qualifier-network
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lead-qualifier-worker
+    command: celery -A src.tasks worker --loglevel=info --concurrency=4
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - CLEARBIT_API_KEY=${CLEARBIT_API_KEY}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-qualifier}:${POSTGRES_PASSWORD:-qualifier}@postgres:5432/${POSTGRES_DB:-lead_qualifier}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - qualifier-network
+
+  flower:
+    image: mher/flower:2.0
+    container_name: lead-qualifier-flower
+    ports:
+      - "${FLOWER_PORT:-5555}:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_BASIC_AUTH=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
+    depends_on:
+      - redis
+      - worker
+    restart: unless-stopped
+    networks:
+      - qualifier-network
+
+volumes:
+  redis-data:
+    driver: local
+  postgres-data:
+    driver: local
+
+networks:
+  qualifier-network:
+    driver: bridge
