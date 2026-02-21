@@ -1,0 +1,245 @@
+# AI Lead Qualifier - Scoring Configuration
+# This file defines the Ideal Customer Profile (ICP) and scoring rules
+# Adjust weights and thresholds to match your sales strategy
+
+# ============================================================
+# Ideal Customer Profile (ICP)
+# ============================================================
+icp:
+  company_size:
+    min: 50
+    max: 10000
+    ideal_range: [200, 5000]
+
+  industries:
+    tier_1:  # Perfect fit
+      - "technology"
+      - "software"
+      - "fintech"
+      - "e-commerce"
+    tier_2:  # Good fit
+      - "finance"
+      - "healthcare"
+      - "manufacturing"
+      - "professional_services"
+    tier_3:  # Acceptable
+      - "education"
+      - "media"
+      - "real_estate"
+      - "logistics"
+
+  revenue:
+    min: 1000000        # $1M minimum
+    ideal_min: 5000000  # $5M+ preferred
+    enterprise: 50000000 # $50M+ = enterprise tier
+
+  geography:
+    primary:
+      - "US"
+      - "CA"
+      - "UK"
+      - "AU"
+    secondary:
+      - "DE"
+      - "FR"
+      - "NL"
+      - "SE"
+
+  tech_stack_signals:  # Positive buying signals
+    - "salesforce"
+    - "hubspot"
+    - "marketo"
+    - "outreach"
+    - "gong"
+    - "slack"
+    - "jira"
+
+# ============================================================
+# Scoring Weights
+# ============================================================
+scoring:
+  weights:
+    company_fit: 0.35      # How well the company matches ICP
+    intent_signal: 0.30    # Strength of buying intent
+    budget_indicator: 0.20 # Budget signals and deal size potential
+    urgency: 0.15          # Time sensitivity of the opportunity
+
+  # Sub-weights for company_fit scoring
+  company_fit_factors:
+    industry_match: 0.30
+    size_match: 0.25
+    revenue_match: 0.25
+    tech_stack_match: 0.20
+
+  # Sub-weights for intent_signal scoring
+  intent_factors:
+    message_analysis: 0.40  # NLP analysis of lead message
+    page_visits: 0.25       # Website behavior tracking
+    content_downloads: 0.20 # Whitepapers, case studies
+    email_engagement: 0.15  # Open rates, click rates
+
+  # Keywords that boost intent score
+  high_intent_keywords:
+    - "looking for"
+    - "evaluating"
+    - "budget approved"
+    - "replacing"
+    - "deadline"
+    - "decision maker"
+    - "implementation timeline"
+    - "pilot program"
+    - "proof of concept"
+    - "RFP"
+
+  low_intent_keywords:
+    - "just browsing"
+    - "student"
+    - "research project"
+    - "no budget"
+    - "free tier"
+
+# ============================================================
+# Lead Tiers and Routing Rules
+# ============================================================
+routing:
+  tiers:
+    hot:
+      min_score: 80
+      max_response_time: 300   # 5 minutes
+      action: route_to_ae
+      notifications:
+        slack: true
+        email: true
+        sms: false
+      auto_actions:
+        - create_crm_deal
+        - schedule_demo_link
+        - enrich_full_profile
+
+    warm:
+      min_score: 50
+      max_response_time: 3600  # 1 hour
+      action: add_to_nurture
+      notifications:
+        slack: true
+        email: false
+        sms: false
+      auto_actions:
+        - create_crm_contact
+        - add_to_email_sequence
+
+    cold:
+      min_score: 0
+      max_response_time: 86400 # 24 hours
+      action: add_to_marketing
+      notifications:
+        slack: false
+        email: false
+        sms: false
+      auto_actions:
+        - add_to_newsletter
+
+# ============================================================
+# AI Model Configuration
+# ============================================================
+ai:
+  model: gpt-4-turbo-preview
+  temperature: 0.3          # Low temp for consistent scoring
+  max_tokens: 1000
+  timeout: 30               # seconds
+  retry_attempts: 3
+  retry_delay: 2            # seconds between retries
+
+  system_prompt: |
+    You are an expert sales qualification analyst. Analyze the provided
+    lead information and score them based on the ICP criteria. Be precise
+    and data-driven in your assessment. Always provide specific reasoning
+    for your scores.
+
+# ============================================================
+# Enrichment Sources
+# ============================================================
+enrichment:
+  providers:
+    clearbit:
+      enabled: true
+      priority: 1
+      timeout: 10
+      cache_ttl: 86400  # 24 hours
+
+    hunter:
+      enabled: true
+      priority: 2
+      timeout: 10
+      cache_ttl: 604800  # 7 days
+
+    linkedin:
+      enabled: false     # Requires proxycurl API
+      priority: 3
+      timeout: 15
+      cache_ttl: 604800
+
+  cache:
+    backend: redis
+    default_ttl: 86400
+    max_entries: 100000
+
+# ============================================================
+# CRM Integration
+# ============================================================
+crm:
+  provider: hubspot  # hubspot | salesforce
+
+  hubspot:
+    pipeline_id: default
+    deal_stage_mapping:
+      hot: "qualifiedtobuy"
+      warm: "appointmentscheduled"
+      cold: "subscriber"
+    custom_properties:
+      - name: "ai_score"
+        type: "number"
+      - name: "ai_tier"
+        type: "string"
+      - name: "ai_reasoning"
+        type: "string"
+
+  salesforce:
+    record_type: Lead
+    lead_source: Website
+    assignment_rule: territory_based
+
+# ============================================================
+# Notifications
+# ============================================================
+notifications:
+  slack:
+    enabled: true
+    channel: "#sales-leads"
+    hot_channel: "#hot-leads"
+    mention_on_hot: true
+    mention_group: "@sales-team"
+
+  email:
+    enabled: true
+    from: leads@syncta.ai
+    digest_frequency: daily  # realtime | hourly | daily
+
+# ============================================================
+# Rate Limiting & Performance
+# ============================================================
+performance:
+  rate_limit:
+    max_per_minute: 60
+    max_per_hour: 2500
+    burst_size: 10
+
+  batch_processing:
+    enabled: true
+    max_batch_size: 100
+    concurrent_workers: 5
+
+  monitoring:
+    log_level: INFO
+    metrics_enabled: true
+    alert_on_error_rate: 0.05  # Alert if >5% error rate
